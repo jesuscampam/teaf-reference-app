@@ -1,0 +1,53 @@
+[project]
+name = "teaf-reference-app"
+version = "0.1.0-alpha"
+description = "Official reference application for the Torus Enterprise Application Framework."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic-settings>=2.7.0",
+]
+
+# NOTE: `teaf` is intentionally NOT declared as a dependency here.
+# TEAF (torus-enterprise-framework) does not currently expose an
+# installable `teaf` package (no [build-system], no `teaf/__init__.py`,
+# no `Application` class) — see docs/BOOTSTRAP.md for the full report.
+# Declaring it would break `pip install -e .` for this repo today.
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.1",
+    "fastapi>=0.115.6",
+    "ruff>=0.8.4",
+    "black>=24.10.0",
+    "mypy>=1.14.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.black]
+target-version = ["py311"]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["backend", "tests"]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
