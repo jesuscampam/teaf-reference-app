@@ -1,24 +1,16 @@
-"""Tests for backend.app — the reference TEAF consumption pattern.
+"""Tests for app.main — the reference TEAF consumption pattern.
 
-These tests are guarded by `pytest.importorskip("teaf")` because TEAF
-does not currently expose a public `teaf` package (see
-docs/BOOTSTRAP.md, "TEAF Public API Limitation"). They SKIP cleanly
-today rather than fail, and will activate automatically the moment
-`teaf` becomes importable — no changes needed here.
+TEAF v0.6.1-alpha ships a real, installable `teaf` package, so these run
+for real (no skip guard): `Application` is instantiated and served
+through `TestClient` exactly as any ASGI app would be.
 """
 
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
-pytest.importorskip(
-    "teaf",
-    reason="TEAF does not yet expose a public `teaf` package — see docs/BOOTSTRAP.md.",
-)
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-from backend.app import app  # noqa: E402
+from app.main import app
 
 client = TestClient(app)
 

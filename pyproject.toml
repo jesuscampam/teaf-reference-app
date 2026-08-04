@@ -8,11 +8,13 @@ dependencies = [
     "pydantic-settings>=2.7.0",
 ]
 
-# NOTE: `teaf` is intentionally NOT declared as a dependency here.
-# TEAF (torus-enterprise-framework) does not currently expose an
-# installable `teaf` package (no [build-system], no `teaf/__init__.py`,
-# no `Application` class) — see docs/BOOTSTRAP.md for the full report.
-# Declaring it would break `pip install -e .` for this repo today.
+# NOTE: `teaf` is intentionally NOT declared as a PEP 508 dependency
+# here. As of TEAF v0.6.1-alpha it IS a real, installable package (see
+# docs/BOOTSTRAP.md), but it isn't published to any package index, so
+# pinning an unqualified "teaf" entry would break `pip install -e .`
+# anywhere the sibling checkout isn't at a fixed, known path. Per this
+# project's documented setup (docs/RUNNING.md), install it explicitly
+# first: `pip install -e ../torus-enterprise-framework`.
 
 [project.optional-dependencies]
 dev = [
@@ -30,7 +32,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["backend*"]
+include = ["app*"]
 
 [tool.ruff]
 target-version = "py311"
@@ -45,8 +47,14 @@ line-length = 100
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["backend", "tests"]
+packages = ["app", "tests"]
 strict = true
+# `teaf` is installed as a setuptools PEP 660 editable install, which
+# uses a dynamic import finder mypy's static resolver can't traverse.
+# Point mypy directly at the sibling checkout's sources instead (same
+# location `pip install -e ../torus-enterprise-framework` installs
+# from) so `from teaf import ...` type-checks for real.
+mypy_path = "../torus-enterprise-framework"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
