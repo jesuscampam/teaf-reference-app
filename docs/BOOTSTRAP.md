@@ -150,3 +150,25 @@ or crashing collision. Until that happens, TEAF's own
 templates and new consumers away from naming their own top-level
 package `backend` (or any of `runtime`, `core`, `contracts`,
 `providers`, `sdk` — TEAF's other internal namespaces).
+
+## Compatibility validation — TEAF v0.6.2-alpha
+
+TEAF moved its internal implementation from a top-level `backend/`
+package to `teaf._internal/` (Sprint 2.6.2), exactly the proposal noted
+above — its own `[project] version` is now `0.6.2-alpha`, and the
+public contract in `teaf/__init__.py` is unchanged (same fourteen
+symbols plus companions). This repository was re-validated against it
+with **zero code changes required**: `from teaf import Application,
+Version` still resolve correctly, `app/main.py` still starts unmodified
+via `uvicorn app.main:app --reload`, all four endpoints
+(`/`, `/health`, `/info`, `/runtime/info`) still return `200` with live
+data reflecting `frameworkVersion: "0.6.2-alpha"`, and the full test
+suite (8/8), `ruff`, `black`, and `mypy --strict` all remain clean. As a
+secondary confirmation: `import backend` now raises `ModuleNotFoundError`
+in this environment — TEAF no longer claims that namespace at all, so
+the collision risk documented under "Sprint A0.1" above is now
+structurally impossible, independent of this repository's own naming.
+
+Note: at validation time, this refactor existed on TEAF's
+`claude/teaf-framework-architecture-v9a9bg` branch, not yet merged to
+`main`.
