@@ -10,7 +10,7 @@ from app.config import AppSettings, get_settings
 def test_default_settings() -> None:
     settings = AppSettings()
 
-    assert settings.app_version == "0.1.0-alpha"
+    assert settings.app_version == "0.1.1-alpha"
 
 
 def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

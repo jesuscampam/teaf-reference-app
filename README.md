@@ -1,7 +1,7 @@
 # TEAF Reference App
 
 Official reference application for the Torus Enterprise Application
-Framework (TEAF). Version `0.1.0-alpha`, built against TEAF `v0.6.1-alpha`.
+Framework (TEAF). Version `0.1.1-alpha`, built against TEAF `v0.6.1-alpha`.
 
 ## What this is
 

@@ -102,3 +102,51 @@ returns TEAF's *framework* version, not the consuming app's.
 `/`, `/health`, `/info`, `/runtime/info` are provided entirely by TEAF —
 this application defines no routes of its own. Verified end-to-end in
 `docs/RUNNING.md`.
+
+## Sprint A0.1 — First Running Application (v0.1.1-alpha)
+
+Sprint A0.1's brief asked, textually, for the top-level package to be
+named `backend/` again (`backend/__init__.py`, `backend/main.py`,
+`backend/config.py`, started via `uvicorn backend.main:app --reload`).
+That is exactly the naming this repository moved away from in Sprint A0
+(see "Why `app/`, not `backend/`" above), for a reason that is still
+true today: `backend` is TEAF's own private, internal namespace.
+
+Re-verified for this sprint before deciding: creating a top-level
+`backend/__init__.py` in this repo again, with TEAF v0.6.1-alpha
+installed in the same environment, still produces one of two bad
+outcomes, deterministically, depending purely on `sys.path` ordering
+between the two editable installs — not on anything this app's code
+does:
+
+1. This repo's `backend` package wins → TEAF's own
+   `from backend.config.settings import Settings` (inside
+   `teaf.application`) breaks with
+   `ModuleNotFoundError: No module named 'backend.config.settings'`.
+2. TEAF's `backend` package wins → `uvicorn backend.main:app` would
+   resolve to **TEAF's own internal bootstrap app**
+   (`torus-enterprise-framework/backend/main.py`, which also defines a
+   module-level `app`), not this repository's code — a silent
+   misdirection, worse than a crash, since it *looks* like it works.
+
+Per this sprint's own "IMPORTANTE" clause (don't work around it, don't
+modify TEAF, document the limitation and propose exactly what TEAF
+should change), this repository keeps the `app/` layout from Sprint A0
+rather than reintroducing `backend/`. Everything else in this sprint's
+brief is otherwise satisfied: `Application` created solely via
+`from teaf import Application`, no internal namespace imports, no
+business logic/CRUD/persistence/auth, config limited to what TEAF
+doesn't already cover, and the app started with `uvicorn app.main:app
+--reload` (the one deviation from the literal spec, documented here).
+
+**Proposal for a future TEAF sprint:** rename TEAF's own internal
+implementation package away from the common, easily-collided name
+`backend` — e.g. to a clearly private-marked name such as
+`_teaf_internal/` or `teaf_backend/` — so that consumer applications
+remain free to use conventional names like `backend/`, `app/`, or
+`core/` for their own code without risking exactly this class of silent
+or crashing collision. Until that happens, TEAF's own
+`docs/public-api/IMPORT-GUIDE.md` should explicitly warn scaffolding
+templates and new consumers away from naming their own top-level
+package `backend` (or any of `runtime`, `core`, `contracts`,
+`providers`, `sdk` — TEAF's other internal namespaces).

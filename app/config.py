@@ -21,7 +21,7 @@ class AppSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_version: str = "0.1.0-alpha"
+    app_version: str = "0.1.1-alpha"
 
 
 @lru_cache
