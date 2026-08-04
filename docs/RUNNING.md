@@ -20,8 +20,11 @@ pytest -v
 ```
 
 All tests run for real against TEAF — `tests/test_config.py` covers this
-app's own `app_version` setting, and `tests/test_app.py` instantiates
-`Application` and exercises the four TEAF endpoints through `TestClient`.
+app's own `app_version` setting, `tests/test_app.py` instantiates
+`Application` and exercises the four TEAF endpoints, and
+`tests/modules/task/` covers the Task Manager module layer by layer
+(model, repository, service, HTTP routes) plus its SDK registration and
+Runtime integration.
 
 Coverage:
 
@@ -53,4 +56,12 @@ curl http://localhost:8000/
 curl http://localhost:8000/health
 curl http://localhost:8000/info
 curl http://localhost:8000/runtime/info
+```
+
+Verify the Task Manager module — see the README for the full `/tasks`
+walkthrough; to confirm registration specifically:
+
+```bash
+curl http://localhost:8000/runtime/modules      # "task", status "implemented"
+curl http://localhost:8000/runtime/capabilities # "task.manage"
 ```

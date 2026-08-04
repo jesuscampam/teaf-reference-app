@@ -172,3 +172,81 @@ structurally impossible, independent of this repository's own naming.
 Note: at validation time, this refactor existed on TEAF's
 `claude/teaf-framework-architecture-v9a9bg` branch, not yet merged to
 `main`.
+
+## Sprint A1 — First Business Module: Task Manager (v0.2.0-alpha)
+
+The first real business module built on TEAF: `app/modules/task/`, a
+`Task` entity (`id`, `title`, `description`, `completed`, `created_at`,
+`updated_at`), an `InMemoryTaskRepository` (no database — only to
+validate the SDK), a `TaskService` with the six required operations, and
+six HTTP endpoints (`GET/POST /tasks`, `GET/PUT/DELETE /tasks/{id}`,
+`POST /tasks/{id}/complete`). Built entirely against TEAF's public Module
+SDK (`teaf.Module`, `ModuleBuilder`, `ModuleContext`, `ModuleManifest`,
+`Lifetime`, `CapabilityCategory`, `Health`) — verified via `grep` that
+`app/` contains exactly two `teaf` imports, both from the public package
+(`app/main.py`, `app/modules/task/module.py`), and zero references to
+`teaf._internal.*` or any of TEAF's other internal namespaces.
+
+### How module registration actually works
+
+`TaskModule.get_manifest()` describes the module with `ModuleBuilder`;
+the inherited `ModuleBase.bootstrap(context)` validates it, registers it
+into the `Runtime`'s `ModuleRegistry`, and binds its services/capabilities
+— exactly the flow demonstrated in TEAF's own
+`examples/basic-module/main.py`. The only non-obvious part, discovered
+by testing against a *running* `uvicorn` process rather than assuming
+the example's manual-`Runtime` pattern would translate directly:
+
+1. **`Application` has no way to accept modules at construction time** —
+   `Application(settings=None)` is its only parameter. A consumer has to
+   bootstrap their module against `app.runtime` themselves.
+2. **TEAF's `create_app()` wires FastAPI's `lifespan` directly to
+   `Runtime.startup()`/`shutdown()`** (`teaf/_internal/core/application.py`,
+   `_lifespan`). Passing an explicit `lifespan=` to Starlette/FastAPI
+   disables its `on_startup`/`on_shutdown` event-handler mechanism
+   entirely (verified by reading `starlette.routing.Router.__init__`) —
+   so `app.asgi.add_event_handler("startup", ...)` is silently never
+   called. There is no public hook to run code before or during
+   `Runtime.startup()`.
+3. **The only remaining option is to bootstrap the module at import
+   time**, before uvicorn starts serving. But `module.bootstrap()` is
+   `async`, and `uvicorn app.main:app` imports the app string *from
+   inside its own already-running event loop* (confirmed empirically:
+   `asyncio.run()` at module level raised `RuntimeError: asyncio.run()
+   cannot be called from a running event loop` the moment this was run
+   under real `uvicorn`, despite working fine under a plain
+   `python -c "..."` import). Running the bootstrap on a dedicated
+   thread with its own fresh loop, then joining it, sidesteps this
+   without depending on whether an outer loop happens to be running —
+   see `app/main.py`.
+
+This is a real gap in the public API, not a workaround for a missing
+feature: `Application` and TEAF's Module SDK are both fully public and
+used exactly as documented — there simply isn't a public, first-class way
+to say "start this Application with these modules already registered."
+
+**Proposal for a future TEAF sprint:** add a `modules` parameter to
+`Application.__init__` (e.g. `Application(modules: Sequence[Module] =
+()) `) that bootstraps each module *inside* `_lifespan`, before calling
+`runtime.startup()` — so module registration participates in the same
+async context TEAF already controls, and consumer code never needs to
+reach for threads or worry about which event loop is active at import
+time. This would remove the only genuinely awkward line in
+`app/main.py`.
+
+### Validation
+
+`pytest -v --cov=app`: 40/40 passed, 100% coverage across `app/` (config,
+main, and all six `task` module files). `ruff`, `black`, and
+`mypy --strict` all clean (one narrow, standard `# type: ignore[type-abstract]`
+on a single line in `module.py`, where `TaskRepository` — a `Protocol`,
+used only as a dependency-injection key — is passed to
+`ServiceContainer.resolve(contract: type[T])`; mypy's `type-abstract`
+check assumes `type[T]` arguments must be instantiable, which doesn't
+apply to container lookups by contract). Confirmed live via `uvicorn
+app.main:app`: all six `/tasks` endpoints work end-to-end (create, list,
+get, update, complete, delete, including a real 404 on a deleted task),
+and `task` appears in `/info`, `/runtime/modules` (status `"implemented"`,
+capability `"task.manage"`), and `/runtime/capabilities` alongside TEAF's
+seven built-in `"contracts_only"` modules. `torus-enterprise-framework`
+was not modified.

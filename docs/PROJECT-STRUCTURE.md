@@ -4,16 +4,33 @@
 teaf-reference-app/
 ├── app/
 │   ├── __init__.py
-│   ├── config.py      # This app's own settings: only `app_version`
-│   └── main.py         # from teaf import Application → app = Application()
+│   ├── config.py                 # This app's own settings: only `app_version`
+│   ├── main.py                   # Application() + Task module registration + router mount
+│   └── modules/
+│       ├── __init__.py
+│       └── task/                 # Task Manager — the reference business module
+│           ├── __init__.py
+│           ├── models.py         # Task entity (dataclass)
+│           ├── repository.py     # TaskRepository (Protocol) + InMemoryTaskRepository
+│           ├── services.py       # TaskService — all business logic
+│           ├── schemas.py        # Pydantic request/response models
+│           ├── routes.py         # FastAPI APIRouter — the 6 /tasks endpoints
+│           └── module.py         # TaskModule(teaf.Module) — SDK registration
 ├── tests/
 │   ├── __init__.py
-│   ├── test_config.py  # app/config.py — no TEAF dependency
-│   └── test_app.py     # Application instantiation + the 4 TEAF endpoints
+│   ├── test_config.py            # app/config.py — no TEAF dependency
+│   ├── test_app.py               # Application instantiation + the 4 TEAF endpoints
+│   └── modules/task/
+│       ├── test_models.py
+│       ├── test_repository.py
+│       ├── test_services.py
+│       ├── test_routes.py        # HTTP layer, isolated FastAPI app
+│       ├── test_module.py        # Manifest validity + bootstrap() against a standalone Runtime
+│       └── test_integration.py   # Registered against the real app.main.app
 ├── docs/
-│   ├── BOOTSTRAP.md          # Sprint scope, the TEAF public API history, and the app/ rename rationale
-│   ├── PROJECT-STRUCTURE.md  # This file
-│   └── RUNNING.md            # Install / test / lint / run instructions
+│   ├── BOOTSTRAP.md               # Sprint-by-sprint history and every documented decision/limitation
+│   ├── PROJECT-STRUCTURE.md       # This file
+│   └── RUNNING.md                 # Install / test / lint / run instructions
 ├── README.md
 ├── pyproject.toml
 ├── .gitignore
@@ -24,17 +41,29 @@ teaf-reference-app/
 
 - **`app/`** (not `backend/` — see `docs/BOOTSTRAP.md`, "Why `app/`, not
   `backend/`") holds only what this reference app owns: its own
-  configuration and the single entrypoint that consumes TEAF's public
-  API. No routers, no models, no services — TEAF provides all of that.
-- **`config.py`** is separated from **`main.py`** so the parts of this
-  application that don't depend on TEAF (its own version string) stay
-  independently testable. It intentionally does **not** redeclare
+  configuration, the entrypoint, and its business modules. No code here
+  reimplements anything TEAF already provides.
+- **`config.py`** intentionally does **not** redeclare
   `app_name`/`environment`/`host`/`port` — TEAF's own public
   `Configuration`/`get_configuration` already cover those, reading the
-  same environment variables.
-- **`tests/`** mirrors `app/` one-to-one: one test module per source
-  module, no shared fixtures beyond what `pytest` and `pytest-cov`
-  provide out of the box.
-- **`docs/`** is kept to exactly the three files this sprint calls for —
-  no extra documents, per the "don't add more than requested" spirit of
-  this sprint.
+  same environment variables. Only `app_version` (this app's own version,
+  distinct from TEAF's framework version) lives here.
+- **`app/modules/task/`** follows Clean Architecture layering end to end:
+  `models.py` (domain entity, no framework dependency) →
+  `repository.py` (persistence contract + in-memory implementation,
+  dependency-inverted — `TaskService` depends on the `TaskRepository`
+  Protocol, never on `InMemoryTaskRepository` directly) → `services.py`
+  (use cases, the only place with business logic) → `schemas.py` (HTTP
+  DTOs, kept separate from the domain `Task` dataclass) → `routes.py`
+  (thin FastAPI layer, no logic of its own) → `module.py` (the only file
+  that imports `teaf.*` — registers services/capabilities/health checks
+  via `ModuleBuilder`, per TEAF's public Module SDK).
+- **`tests/`** mirrors `app/` one-to-one, plus `modules/task/` covering
+  each Clean Architecture layer independently (model, repository,
+  service, HTTP routes in isolation) and two module-specific concerns:
+  SDK registration against a standalone `Runtime` (`test_module.py`) and
+  integration against the real, wired `Application`
+  (`test_integration.py`).
+- **`docs/`** is kept to exactly the three files the original sprint
+  called for — new sprints extend `BOOTSTRAP.md` rather than adding more
+  files.
