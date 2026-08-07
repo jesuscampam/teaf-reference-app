@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TEAF Task Manager</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1>TEAF Task Manager</h1>
+        <p class="subtitle">Reference Application &middot; Task Manager module</p>
+      </header>
+
+      <section class="panel">
+        <h2>New task</h2>
+        <form id="create-form" class="create-form">
+          <div class="field-group">
+            <input
+              id="create-title"
+              type="text"
+              placeholder="Title"
+              maxlength="200"
+              required
+            />
+            <input
+              id="create-description"
+              type="text"
+              placeholder="Description"
+              maxlength="500"
+              required
+            />
+          </div>
+          <button type="submit">Create</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Tasks</h2>
+        <div id="status-message" class="status-message" hidden></div>
+        <ul id="task-list" class="task-list"></ul>
+      </section>
+
+      <footer class="app-footer">
+        <span>Total: <strong id="stat-total">0</strong></span>
+        <span>Pending: <strong id="stat-pending">0</strong></span>
+        <span>Completed: <strong id="stat-completed">0</strong></span>
+      </footer>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

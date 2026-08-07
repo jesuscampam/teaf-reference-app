@@ -250,3 +250,128 @@ and `task` appears in `/info`, `/runtime/modules` (status `"implemented"`,
 capability `"task.manage"`), and `/runtime/capabilities` alongside TEAF's
 seven built-in `"contracts_only"` modules. `torus-enterprise-framework`
 was not modified.
+
+## Sprint A1.1 — TEAF v0.10.0-alpha Alignment + First Visual UI
+
+Two things, neither changing this app's own version (`0.2.0-alpha` — no
+new contract, per this sprint's own instruction not to bump arbitrarily):
+align with TEAF's real public API as of v0.10.0-alpha (the proposal from
+Sprint A1 above was implemented for real, under a different, better name
+— see below), and add a small browser UI for the Task Manager.
+
+### The workaround is gone — for real, not just relocated
+
+TEAF v0.10.0-alpha's `Application` now accepts modules directly:
+
+```python
+# teaf/application.py
+def __init__(self, settings=None, *, modules: Sequence[ModuleBase] | None = None) -> None: ...
+def add_module(self, module: ModuleBase) -> Application: ...
+```
+
+Confirmed by reading `teaf/application.py` and `teaf/_internal/core/application.py`
+directly (not assumed): modules passed via `modules=` are stored on
+`app.state.pending_modules` and bootstrapped by `_bootstrap_pending_modules()`
+*inside* TEAF's own `_lifespan()`, right alongside `Runtime.startup()` —
+exactly the shape proposed in Sprint A1. `app/main.py` now reads:
+
+```python
+app = Application(modules=[TaskModule()])
+```
+
+No `threading.Thread`, no `asyncio.run()`, no manual `ModuleContext`
+construction, no helper function that existed only for that workaround —
+all removed. Verified with an AST-based import audit (not just `grep`)
+across `app/` and `tests/`: zero references to `teaf._internal`, `backend.*`,
+or any other private namespace; exactly two `from teaf import ...`
+statements in the whole app (`app/main.py`, `app/modules/task/module.py`).
+
+**One real consequence, not a workaround:** since module bootstrap now
+happens *during* the lifespan instead of eagerly at import time,
+`TaskService` isn't resolvable the instant `Application(...)` returns —
+only once the lifespan has actually started. `app/modules/task/routes.py`
+resolves it lazily, per request, via a small accessor function instead of
+capturing a `TaskService` instance up front. This also means tests that
+hit the real `app.main.app` must enter `TestClient(app)` as a context
+manager (`with TestClient(app) as client:`) so the lifespan actually
+runs — and, since `app.main.app` is a single process-wide object,
+re-entering that context a *second* time (e.g. from a second test file
+each creating their own `TestClient`) re-bootstraps `TaskModule` against
+a `Runtime` that already has it registered, raising
+`ModuleRegistrationException`. `tests/conftest.py` fixes this with one
+session-scoped `client` fixture shared by every test file that needs a
+live app — the lifespan starts once, is reused everywhere, and shuts
+down once at the end of the run.
+
+### First visual UI
+
+`app/static/` (`index.html`, `styles.css`, `app.js`) — plain HTML/CSS/
+vanilla JavaScript, no framework, no bundler, no Node.js/npm, served
+directly by FastAPI's `StaticFiles` under `/static/*`, with `index.html`
+served at `/` by one dedicated route. The UI holds no business logic: it
+only calls the real `/tasks` endpoints and renders the response, with
+loading/empty/error states. No mocks anywhere.
+
+Two real integration issues surfaced only by testing this properly (not
+just with `pytest`/`curl`, but by actually loading the page in a real
+browser — see "Validation" below) — both resolved using only public API,
+neither requiring a TEAF change:
+
+1. **Route conflict at `/`.** TEAF's `create_app()` already registers
+   `GET /` (a JSON status endpoint, from its health router) before this
+   app ever gets `.asgi`. Starlette matches the *first* full
+   `(path, method)` match in registration order, so a naively-added
+   second `GET /` handler is permanently unreachable. Fix: register the
+   UI route normally, then move just that one route to the front of
+   `app.asgi.router.routes` — standard, fully public Starlette/FastAPI
+   list manipulation (not a `teaf._internal` import), scoped to the
+   single `/` path. `/health`, `/info`, `/runtime/*`, and `/tasks/*` are
+   untouched (see `tests/test_ui.py`,
+   `test_health_and_info_still_json_after_root_reorder`). Static assets
+   are served under `/static/*` rather than mounted at `/`, specifically
+   to avoid a second, worse version of the same problem: a
+   `StaticFiles` mount at `/` would match *every* path as a fallback,
+   silently shadowing `/health`, `/tasks`, etc. too.
+
+2. **TEAF's default Content-Security-Policy blocks the UI's own assets.**
+   TEAF's `SecurityHeadersMiddleware` (Sprint 2.9.2) sends
+   `Content-Security-Policy: default-src 'none'` on every response by
+   default — correct for a pure JSON API, and it never showed up in any
+   `curl`- or `pytest`-based check, because CSP is enforced by browsers,
+   not HTTP clients. Loading `http://localhost:8000/` in an actual
+   Chromium instance (via Playwright, for this one verification step —
+   not a project dependency, removed again afterward) showed the real
+   symptom immediately: `styles.css` and `app.js` both refused to load,
+   console errors citing the policy by name. Confirmed in
+   `teaf/_internal/middleware/security_headers.py`'s own docstring that
+   this is an intentional, *documented* override point: "a header the
+   application already set is never overwritten." `app/main.py`'s `/`
+   handler now sets its own `Content-Security-Policy: default-src 'self';
+   frame-ancestors 'none'` — same-origin only, still restrictive, just
+   not `'none'` — and TEAF's middleware backs off for that one response.
+   Locked in as a regression test (`test_root_csp_allows_same_origin_assets`)
+   so this doesn't require a real browser to catch next time.
+
+### Validation
+
+`pytest -v --cov=app`: 45/45 passed, 100% coverage across all of `app/`
+(config, main, the Task Manager module, and the UI routes). `ruff` and
+`black` clean. `mypy --strict app tests`: genuinely 0 findings — the two
+external errors this surfaced (TEAF's own Redis-cache and LDAP-identity
+provider modules, neither used by this app, referencing third-party
+client libraries this app doesn't install) are handled with a
+`[[tool.mypy.overrides]]` scoped to exactly `redis.*`/`ldap3.*`, not a
+blanket suppression (see `pyproject.toml`). AST import audit: zero
+forbidden imports in `app/` or `tests/`.
+
+Real, non-mocked verification with `uvicorn app.main:app` actually
+running: all four TEAF endpoints and all six `/tasks` endpoints checked
+via `curl`, `task` confirmed in `/runtime/modules`/`/runtime/capabilities`
+(same as Sprint A1) — and, going beyond `curl`, a full click-through of
+the live UI in real Chromium (load → create → edit → complete → delete,
+each step screenshotted, DOM/state asserted after each action, zero
+unexpected console errors — the one `404` observed was the browser's own
+automatic `/favicon.ico` request, unrelated to this app). This is what
+caught the CSP issue above; a `curl`-only pass would have reported every
+endpoint as `200 OK` while the UI was, in fact, completely broken in any
+real browser.

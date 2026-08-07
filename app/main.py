@@ -1,30 +1,50 @@
 """Reference entrypoint for consuming TEAF's public API.
 
-Written against TEAF v0.6.2-alpha's public `teaf` package. `Application`
-takes no `name`/`version`/`description` arguments — its only parameter is
-an optional `settings` override (`teaf.Configuration`). Naming,
-environment, host, and port are resolved from the environment
+Written against TEAF v0.10.0-alpha's public `teaf` package. `Application`
+takes no `name`/`version`/`description` arguments — its only positional
+parameter is an optional `settings` override (`teaf.Configuration`).
+Naming, environment, host, and port are resolved from the environment
 (`APP_NAME`, `ENVIRONMENT`, `HOST`, `PORT` — see .env.example), matching
 TEAF's own convention. `app.version` reflects TEAF's own framework
 version, not this application's — see `app.config.get_settings().app_version`
 for this app's own version.
 
-Registers the Task Manager business module (app/modules/task/) against
-this Application's `Runtime`. TEAF's `create_app()` wires FastAPI's
-`lifespan` directly to `Runtime.startup()`/`shutdown()` (see
-docs/BOOTSTRAP.md, "Sprint A1"), which replaces Starlette's on_startup
-event mechanism entirely — so a module cannot hook into that lifespan
-after the fact via `add_event_handler`. The only public way to have a
-module registered *before* `Runtime.startup()` runs is to bootstrap it
-here, before uvicorn's event loop takes over.
+Registers the Task Manager business module (app/modules/task/) via
+TEAF's Module Registration API (Sprint 2.6.3): `Application(modules=[...])`
+starts each module automatically as part of TEAF's own ASGI lifespan, in
+the same async context that already drives `Runtime.startup()`/
+`shutdown()`. This replaced the thread + `asyncio.run()` workaround this
+app used against TEAF v0.6.2-alpha — see docs/BOOTSTRAP.md, "Sprint
+A1.1", for why that workaround existed and why it's no longer needed.
 
-`module.bootstrap()` is `async`, but this module-level code runs
-synchronously at import time — and, under `uvicorn app.main:app`,
-that import happens *inside* uvicorn's own already-running event loop
-(uvloop), so a plain `asyncio.run()` here raises "cannot be called from
-a running event loop". Running the bootstrap on a dedicated thread (with
-its own fresh loop) and joining it sidesteps that without depending on
-whether an outer loop happens to be running.
+Because module bootstrap now happens *during* the ASGI lifespan rather
+than eagerly at import time, `TaskService` isn't resolvable the moment
+`Application(...)` returns — only once the lifespan has actually started
+(a real `uvicorn` request, or `with TestClient(app):` in tests). Routes
+that need it resolve it lazily, per call, via `app.runtime` — see
+`app/modules/task/routes.py`.
+
+Serves the Task Manager UI (app/static/) at `GET /`. TEAF's own
+`create_app()` already registers a `GET /` JSON status route (from its
+health router) before this module ever gets `.asgi` — Starlette matches
+the first full (path, method) match in registration order, so without
+reordering, our handler below would be permanently unreachable. The
+one-line reorder below affects only the exact `/` route; `/health`,
+`/info`, `/runtime/*`, and `/tasks/*` are untouched. (No `Mount("/", ...)`
+for static assets — that would shadow every other route, since Starlette
+treats a mount at `/` as a catch-all — assets are served under `/static`
+instead, which needs no reordering.)
+
+TEAF's own `SecurityHeadersMiddleware` (Sprint 2.9.2) sends
+`Content-Security-Policy: default-src 'none'` on every response by
+default — correct for a pure JSON API, but it silently blocks a browser
+from loading `/static/styles.css`/`/static/app.js` or calling `fetch()`
+against `/tasks` from a page served under that policy (caught only by
+actually loading the UI in a real browser — curl doesn't enforce CSP).
+Per that middleware's own documented contract ("a header the application
+already sets is never overwritten"), setting our own
+`Content-Security-Policy` on the `/` response is the public, sanctioned
+override — no TEAF internals touched, no workaround.
 
 Run with:
     uvicorn app.main:app --reload
@@ -32,23 +52,42 @@ Run with:
 
 from __future__ import annotations
 
-import asyncio
-import threading
+from pathlib import Path
 from typing import cast
 
-from teaf import Application, ModuleContext
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from teaf import Application
 
 from app.modules.task.module import TaskModule
 from app.modules.task.routes import create_task_router
 from app.modules.task.services import TaskService
 
-app = Application()
+STATIC_DIR = Path(__file__).parent / "static"
 
-_task_module = TaskModule()
-_context = ModuleContext(runtime=app.runtime, module_id="task")
-_bootstrap_thread = threading.Thread(target=lambda: asyncio.run(_task_module.bootstrap(_context)))
-_bootstrap_thread.start()
-_bootstrap_thread.join()
+#: Same-origin only — this UI loads no external scripts/styles/fonts and
+#: makes no cross-origin requests. See module docstring: overrides TEAF's
+#: default `default-src 'none'` for this one response only.
+_UI_CONTENT_SECURITY_POLICY = "default-src 'self'; frame-ancestors 'none'"
 
-_task_service = cast(TaskService, app.runtime.resolve_service(TaskService))
-app.asgi.include_router(create_task_router(_task_service))
+app = Application(modules=[TaskModule()])
+
+
+def _resolve_task_service() -> TaskService:
+    return cast(TaskService, app.runtime.resolve_service(TaskService))
+
+
+app.asgi.include_router(create_task_router(_resolve_task_service))
+
+
+@app.asgi.get("/", include_in_schema=False)
+def serve_ui() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Content-Security-Policy": _UI_CONTENT_SECURITY_POLICY},
+    )
+
+
+app.asgi.router.routes.insert(0, app.asgi.router.routes.pop())
+
+app.asgi.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

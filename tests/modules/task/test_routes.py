@@ -18,7 +18,7 @@ from app.modules.task.services import TaskService
 def client() -> Iterator[TestClient]:
     service = TaskService(InMemoryTaskRepository())
     app = FastAPI()
-    app.include_router(create_task_router(service))
+    app.include_router(create_task_router(lambda: service))
     with TestClient(app) as test_client:
         yield test_client
 

@@ -56,6 +56,17 @@ strict = true
 # from) so `from teaf import ...` type-checks for real.
 mypy_path = "../torus-enterprise-framework"
 
+# mypy_path above makes all of teaf/_internal/ visible for static
+# resolution (see comment above), including provider modules this app
+# never imports or uses (Redis cache, LDAP identity). Those third-party
+# clients aren't installed here — installing them just to silence mypy
+# would add real dependencies for code this app never calls. Scoped
+# strictly to those two external libraries; nothing in app/ or tests/ is
+# affected (verified: zero mypy findings under app/ or tests/ paths).
+[[tool.mypy.overrides]]
+module = ["redis.*", "ldap3.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

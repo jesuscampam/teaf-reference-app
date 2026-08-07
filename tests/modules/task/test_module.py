@@ -23,7 +23,7 @@ def test_manifest_is_valid() -> None:
 
 
 def test_bootstrap_registers_module_and_service() -> None:
-    runtime = Runtime(registry=ModuleRegistry(), framework_version="0.6.2-alpha")
+    runtime = Runtime(registry=ModuleRegistry(), framework_version="0.10.0-alpha")
     module = TaskModule()
 
     asyncio.run(module.bootstrap(ModuleContext(runtime=runtime, module_id="task")))
