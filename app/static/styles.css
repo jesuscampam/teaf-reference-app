@@ -144,7 +144,7 @@ button.danger:hover {
 
 .task-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-border);
@@ -156,31 +156,39 @@ button.danger:hover {
   color: var(--color-text-muted);
 }
 
-.task-toggle {
-  flex: 0 0 auto;
-  width: 1.35rem;
-  height: 1.35rem;
-  border-radius: 50%;
-  border: 2px solid var(--color-border);
-  background: transparent;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
+/* Status badge — the row's state at a glance. Colour is never the only
+   signal: the label spells the state out for anyone who can't tell the
+   backgrounds apart. */
+.task-status {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
-.task-item.completed .task-toggle {
-  background: var(--color-success);
-  border-color: var(--color-success);
+.status-todo {
+  background: #eef0f4;
+  color: #4b5563;
 }
 
-.task-toggle:hover:not(:disabled) {
-  border-color: var(--color-success);
+.status-in_progress {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
-.task-toggle:disabled {
-  cursor: default;
+.status-done {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.empty-state {
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+  color: var(--color-text-muted);
 }
 
 .task-body {

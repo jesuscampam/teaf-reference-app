@@ -1,11 +1,30 @@
 "use strict";
 
-// UI-only concerns: fetch calls, rendering, and state handling. No task
-// business rules live here — creation/update payloads are sent exactly as
-// the API requires, and all validation/state transitions happen server
-// side in TaskService.
+// UI-only concerns: rendering, view state, and event wiring. No task
+// business rules live here — validation, allowed transitions, and the
+// metric counts all come from the server. Network access goes through
+// `taskApi` (httpClient.js); nothing in this file calls `fetch`.
 
-const API_BASE = "/tasks";
+import { ApiError, taskApi } from "./httpClient.js";
+
+const STATUS_LABELS = {
+  TODO: "To do",
+  IN_PROGRESS: "In progress",
+  DONE: "Done",
+};
+
+/** Which status each task's primary button moves it to. */
+const NEXT_STATUS = {
+  TODO: "IN_PROGRESS",
+  IN_PROGRESS: "DONE",
+  DONE: "TODO",
+};
+
+const NEXT_STATUS_LABELS = {
+  TODO: "Start",
+  IN_PROGRESS: "Complete",
+  DONE: "Reopen",
+};
 
 const taskListEl = document.getElementById("task-list");
 const statusMessageEl = document.getElementById("status-message");
@@ -13,9 +32,11 @@ const createFormEl = document.getElementById("create-form");
 const createTitleEl = document.getElementById("create-title");
 const createDescriptionEl = document.getElementById("create-description");
 const statTotalEl = document.getElementById("stat-total");
-const statPendingEl = document.getElementById("stat-pending");
-const statCompletedEl = document.getElementById("stat-completed");
+const statTodoEl = document.getElementById("stat-todo");
+const statInProgressEl = document.getElementById("stat-in-progress");
+const statDoneEl = document.getElementById("stat-done");
 
+/** The one piece of view state the server does not own: which row is open for editing. */
 let editingTaskId = null;
 
 function showStatus(message, isError) {
@@ -29,53 +50,44 @@ function hideStatus() {
   statusMessageEl.classList.remove("error");
 }
 
-async function apiRequest(path, options) {
-  const response = await fetch(path, options);
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
-  }
-  if (response.status === 204) {
-    return null;
-  }
-  return response.json();
+/** Prefer the server's own message; fall back to ours for anything unexpected. */
+function reportError(error, fallback) {
+  showStatus(error instanceof ApiError ? error.detail : fallback, true);
 }
 
-function renderStats(tasks) {
-  const completed = tasks.filter((task) => task.completed).length;
-  statTotalEl.textContent = String(tasks.length);
-  statCompletedEl.textContent = String(completed);
-  statPendingEl.textContent = String(tasks.length - completed);
+function renderStats(stats) {
+  statTotalEl.textContent = String(stats.total);
+  statTodoEl.textContent = String(stats.todo);
+  statInProgressEl.textContent = String(stats.in_progress);
+  statDoneEl.textContent = String(stats.done);
 }
 
 function renderTasks(tasks) {
-  taskListEl.innerHTML = "";
+  taskListEl.replaceChildren();
 
   if (tasks.length === 0) {
     const empty = document.createElement("li");
-    empty.className = "status-message";
+    empty.className = "empty-state";
     empty.textContent = "No tasks yet. Create your first task.";
     taskListEl.appendChild(empty);
-    renderStats(tasks);
     return;
   }
 
   for (const task of tasks) {
     taskListEl.appendChild(task.id === editingTaskId ? buildEditItem(task) : buildTaskItem(task));
   }
-  renderStats(tasks);
+}
+
+function buildStatusBadge(status) {
+  const badge = document.createElement("span");
+  badge.className = `task-status status-${status.toLowerCase()}`;
+  badge.textContent = STATUS_LABELS[status] ?? status;
+  return badge;
 }
 
 function buildTaskItem(task) {
   const li = document.createElement("li");
-  li.className = "task-item" + (task.completed ? " completed" : "");
-
-  const toggle = document.createElement("button");
-  toggle.className = "task-toggle";
-  toggle.type = "button";
-  toggle.setAttribute("aria-label", "Mark as completed");
-  toggle.textContent = task.completed ? "✓" : "";
-  toggle.disabled = task.completed;
-  toggle.addEventListener("click", () => completeTask(task.id));
+  li.className = "task-item" + (task.status === "DONE" ? " completed" : "");
 
   const body = document.createElement("div");
   body.className = "task-body";
@@ -88,11 +100,15 @@ function buildTaskItem(task) {
   description.className = "task-description";
   description.textContent = task.description;
 
-  body.appendChild(title);
-  body.appendChild(description);
+  body.append(title, description, buildStatusBadge(task.status));
 
   const actions = document.createElement("div");
   actions.className = "task-actions";
+
+  const advanceButton = document.createElement("button");
+  advanceButton.type = "button";
+  advanceButton.textContent = NEXT_STATUS_LABELS[task.status];
+  advanceButton.addEventListener("click", () => changeStatus(task.id, NEXT_STATUS[task.status]));
 
   const editButton = document.createElement("button");
   editButton.type = "button";
@@ -109,12 +125,8 @@ function buildTaskItem(task) {
   deleteButton.textContent = "Delete";
   deleteButton.addEventListener("click", () => deleteTask(task.id));
 
-  actions.appendChild(editButton);
-  actions.appendChild(deleteButton);
-
-  li.appendChild(toggle);
-  li.appendChild(body);
-  li.appendChild(actions);
+  actions.append(advanceButton, editButton, deleteButton);
+  li.append(body, actions);
   return li;
 }
 
@@ -155,59 +167,54 @@ function buildEditItem(task) {
     updateTask(task.id, titleInput.value, descriptionInput.value);
   });
 
-  form.appendChild(titleInput);
-  form.appendChild(descriptionInput);
-  form.appendChild(saveButton);
-  form.appendChild(cancelButton);
+  form.append(titleInput, descriptionInput, saveButton, cancelButton);
   li.appendChild(form);
   return li;
 }
 
+/**
+ * One round trip for the list and one for the counts. The counts are read
+ * from `/tasks/stats` rather than derived here so the numbers on screen are
+ * the server's, not a second implementation of the same arithmetic.
+ */
 async function loadTasks() {
   showStatus("Loading tasks...", false);
   try {
-    const tasks = await apiRequest(API_BASE);
+    const [tasks, stats] = await Promise.all([taskApi.list(), taskApi.stats()]);
     hideStatus();
     renderTasks(tasks);
+    renderStats(stats);
   } catch (error) {
-    showStatus("Unable to load tasks.", true);
-    taskListEl.innerHTML = "";
+    reportError(error, "Unable to load tasks.");
+    taskListEl.replaceChildren();
   }
 }
 
 async function createTask(title, description) {
   try {
-    await apiRequest(API_BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, description }),
-    });
+    await taskApi.create(title, description);
     await loadTasks();
   } catch (error) {
-    showStatus("Unable to create the task.", true);
+    reportError(error, "Unable to create the task.");
   }
 }
 
 async function updateTask(id, title, description) {
   try {
-    await apiRequest(`${API_BASE}/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, description }),
-    });
+    await taskApi.update(id, title, description);
     editingTaskId = null;
     await loadTasks();
   } catch (error) {
-    showStatus("Unable to update the task.", true);
+    reportError(error, "Unable to update the task.");
   }
 }
 
-async function completeTask(id) {
+async function changeStatus(id, status) {
   try {
-    await apiRequest(`${API_BASE}/${id}/complete`, { method: "POST" });
+    await taskApi.changeStatus(id, status);
     await loadTasks();
   } catch (error) {
-    showStatus("Unable to complete the task.", true);
+    reportError(error, "Unable to change the task status.");
   }
 }
 
@@ -216,10 +223,10 @@ async function deleteTask(id) {
     return;
   }
   try {
-    await apiRequest(`${API_BASE}/${id}`, { method: "DELETE" });
+    await taskApi.remove(id);
     await loadTasks();
   } catch (error) {
-    showStatus("Unable to delete the task.", true);
+    reportError(error, "Unable to delete the task.");
   }
 }
 

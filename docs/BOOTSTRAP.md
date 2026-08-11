@@ -375,3 +375,175 @@ automatic `/favicon.ico` request, unrelated to this app). This is what
 caught the CSP issue above; a `curl`-only pass would have reported every
 endpoint as `200 OK` while the UI was, in fact, completely broken in any
 real browser.
+
+## Sprint A2 — Persistence, events, and a controlled status model
+
+Version `0.3.0-alpha`, built against TEAF `v0.10.3-alpha`.
+
+The three previous sprints proved a business module can be registered
+through TEAF's public SDK and driven from a browser. What they did not
+prove is that anything *survives*: every task lived in a dictionary and
+vanished with the process. This sprint closes that, adds the application's
+own events to the framework's bus, and replaces the `completed` boolean
+with a real, if small, status vocabulary.
+
+### What was inspected before writing any code
+
+The sprint brief described a repository that does not exist: a Sprint 3.5
+frontend with `AppLayout`, `QueryBoundary`, `DataTable`, TanStack Query,
+Zustand, and an `HttpClient`, plus authentication, a database, a
+dashboard, and Runtime/Modules/Events screens to "preserve". None of that
+is in this repository, and none of it is in TEAF either — the framework's
+`frontend/` holds folder-structure `README.md` files and states that "el
+shell de aplicación ejecutable se incorpora en la Versión 3 del roadmap".
+What exists is what Sprint A1.1 left: 539 lines of vanilla HTML/CSS/JS.
+
+So "extend the existing frontend, do not rebuild it" was honoured against
+the frontend that actually exists. Building a React/Vite/npm toolchain
+would have contradicted this repository's own standing constraint (no
+framework, no bundler, no Node) recorded in the A1.1 section above.
+
+### Persistence: why the application owns it
+
+TEAF `v0.10.3-alpha` exports 213 public symbols. None of them is a
+database: no `Database`, no `Session`, no `engine`, no repository base.
+`teaf/_internal/database/` contains a single `README.md` describing an
+intended SQLAlchemy/Alembic layer, with no implementation behind it.
+
+There is therefore nothing to consume, and nothing to work around. Task
+persistence is the Reference App's own concern, so
+`SqliteTaskRepository` (`app/modules/task/repository.py`) uses the
+standard library's `sqlite3` — **no new dependency in
+`pyproject.toml`**. SQLAlchemy and Alembic are present in the environment
+as transitive dependencies of `teaf`, but building on a transitive
+install would be wrong, and an ORM plus a migration tool is a lot of
+machinery for one table. Schema creation is one idempotent
+`CREATE TABLE IF NOT EXISTS`; there is no migration framework here to
+hook into and introducing one was out of scope.
+
+`InMemoryTaskRepository` stays for unit tests, and both implementations
+are held to the same contract by a parametrized test class, so the SQLite
+one cannot quietly drift.
+
+### Two TEAF findings, neither patched from this repository
+
+**1. Concurrent first resolution of a singleton reports a cycle that
+doesn't exist.** The new UI loads `/tasks` and `/tasks/stats` in
+parallel. Starlette runs sync handlers in a thread pool, so both can be
+the *first* request to resolve `TaskService`. When that happens TEAF's
+container raises:
+
+```
+CircularDependencyException: Dependencia circular al resolver:
+    TaskService -> TaskRepository -> TaskService
+```
+
+The graph has no cycle — `TaskService` depends on `TaskRepository`, which
+depends on nothing. The container tracks its in-flight resolution chain in
+state shared across threads, so one thread sees the other's partial chain
+and mistakes it for recursion. It is a race, and it produced a real `500`
+in a real browser.
+
+*Affected API:* `Runtime.resolve_service` / the service container's cycle
+detection. *Smallest fix that would be needed in TEAF:* make the
+resolution chain thread-local (or guard singleton construction with a
+per-registration lock) so concurrent resolution of the same contract
+either blocks or reuses the in-flight instance instead of being reported
+as recursion.
+
+*Resolved application-side, without touching TEAF:* `TaskModule.ready()`
+resolves its services during bootstrap, while startup is still
+single-threaded. Every later request then gets the cached singleton and
+never re-enters the factory. That is where singletons should be built
+anyway, so this is not a workaround so much as the correct order —
+`test_services_are_resolved_during_bootstrap` locks it in, and
+`test_concurrent_requests_all_succeed` covers the request shape that
+exposed it.
+
+**2. Overriding `bootstrap()` with a synchronous method fails obscurely.**
+`ModuleBase.bootstrap` is `async`, and `Application` does
+`await module.bootstrap(context)`. A subclass that overrides it
+synchronously gets `TypeError: object NoneType can't be used in 'await'
+expression`, pointing into TEAF rather than at the override. The other
+hooks are fine either way — `invoke_hook` accepts sync and async alike.
+Not a defect, but a sharp edge: this module overrides `configure`,
+`ready`, and `dispose` and leaves `bootstrap` alone. Worth a line in
+TEAF's SDK documentation.
+
+A third, smaller point, recorded because it shaped the tests: TEAF
+publishes its own lifecycle events (`module.registered`,
+`service.resolved`, …) onto the same bus. Assertions filter for the
+application's own event names rather than comparing whole histories.
+
+### Events
+
+`ModuleContext.events` is the public route to the bus, captured in
+`configure()` — which `ModuleBase.bootstrap` runs *before* it binds
+services, so the bus is in place by the time the container can build a
+`TaskService`. The service publishes `task.created`, `task.updated`,
+`task.status_changed`, and `task.deleted`; payloads carry the id plus what
+a subscriber would otherwise have to re-fetch, and nothing more. A test
+subscribes a real handler and asserts it fires, so the bus is exercised as
+pub/sub rather than as a log.
+
+### Status model
+
+`completed: bool` became `TaskStatus` (`TODO`, `IN_PROGRESS`, `DONE`), a
+`StrEnum` so the value crosses HTTP and SQLite with no converter. Any
+transition is allowed — reopening a finished task is ordinary — but
+setting the status a task already has is a `409` rather than a silent
+success, so a caller is never told something changed when nothing did.
+`POST /{id}/complete` is kept for existing clients and is now exactly
+`PATCH /{id}/status` with `DONE`.
+
+`TaskResponse` returning `status` instead of `completed` is a breaking
+change for any client written against `0.2.0-alpha`. It is recorded as
+such in `CHANGELOG.md`.
+
+### Frontend
+
+`app/static/httpClient.js` is now the only place that calls `fetch`;
+`app.js` imports `taskApi` from it. Native ES modules, so there is still
+no bundler, no npm, and no Node — `index.html` just gained
+`type="module"`. The client translates error bodies into one sentence
+(`{"detail": ...}` and FastAPI's 422 array both), and the UI shows the
+server's message rather than a generic one whenever there is one.
+
+Counters come from `GET /tasks/stats`, not from arithmetic in the browser:
+the numbers on screen are the server's, so there is no second
+implementation to drift.
+
+### What is deliberately absent
+
+**Authentication.** TEAF has a full public security surface —
+`JWTProvider`, `SecurityMiddleware`, `ApiProtectionModule`, `authorize`,
+`current_identity`. None of it is wired up: every endpoint here is open.
+The brief said to reuse the existing mechanism and not build a second one,
+and there was no first one; adding login, token storage, and protected
+routes reshapes the whole application and belongs in its own sprint. This
+is a limitation, not an oversight.
+
+**A JavaScript test runner.** The UI is covered by server-side tests and a
+manual browser click-through. Adding Vitest/Jest means adding Node, which
+this repository has consistently declined to do.
+
+### Validation
+
+`pytest`: **139 passed** (baseline for this sprint was 45). `ruff`,
+`black`, and `mypy --strict app tests` all clean, with no new
+`type: ignore`, `noqa`, or relaxed rule — the one typing fix needed was a
+real annotation (`_Responses = dict[int | str, dict[str, Any]]`, matching
+FastAPI's own parameter type), not a suppression. The AST import audit is
+now an executable test rather than an ad-hoc script, and includes a case
+proving the detector catches a planted violation.
+
+Against a live `uvicorn app.main:app`: all six `/tasks` endpoints plus
+`/tasks/stats`, the `409` and `404` paths, TEAF's five JSON endpoints, and
+a full Chromium click-through (create → start → complete → edit → delete,
+counters and status badges asserted after each step, zero console errors
+beyond the browser's own `/favicon.ico` request).
+
+Persistence was verified the only way that means anything: a task was
+created against one `uvicorn` process, the process was killed, a second
+process was started over the same database file, and the task came back
+with its `IN_PROGRESS` status intact.

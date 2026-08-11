@@ -10,6 +10,10 @@ venv/
 
 .env
 
+# The Task Manager's SQLite database (see TASK_DATABASE_PATH).
+tasks.db
+*.db
+
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/

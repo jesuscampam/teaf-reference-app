@@ -44,11 +44,14 @@
 
       <footer class="app-footer">
         <span>Total: <strong id="stat-total">0</strong></span>
-        <span>Pending: <strong id="stat-pending">0</strong></span>
-        <span>Completed: <strong id="stat-completed">0</strong></span>
+        <span>To do: <strong id="stat-todo">0</strong></span>
+        <span>In progress: <strong id="stat-in-progress">0</strong></span>
+        <span>Done: <strong id="stat-done">0</strong></span>
       </footer>
     </main>
 
-    <script src="/static/app.js"></script>
+    <!-- type="module" so app.js can import the shared API client. Native ES
+         modules: no bundler, no npm, still just files served from /static. -->
+    <script type="module" src="/static/app.js"></script>
   </body>
 </html>

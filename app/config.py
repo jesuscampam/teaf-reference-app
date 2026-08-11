@@ -17,11 +17,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AppSettings(BaseSettings):
-    """Settings for the one field TEAF's own Configuration does not cover."""
+    """Settings for the fields TEAF's own Configuration does not cover."""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_version: str = "0.2.0-alpha"
+    app_version: str = "0.3.0-alpha"
+
+    #: Where the Task Manager's SQLite file lives (`TASK_DATABASE_PATH`).
+    #: Relative paths resolve against the working directory the app is
+    #: started from. `:memory:` is honoured and gives a throwaway database,
+    #: which is what the test suite uses. TEAF exposes no database
+    #: configuration of its own to defer to here — see
+    #: app/modules/task/repository.py.
+    task_database_path: str = "tasks.db"
 
 
 @lru_cache
