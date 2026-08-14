@@ -5,7 +5,8 @@
 // metric counts all come from the server. Network access goes through
 // `taskApi` (httpClient.js); nothing in this file calls `fetch`.
 
-import { ApiError, taskApi } from "./httpClient.js";
+import { ApiError, authApi, taskApi } from "./httpClient.js";
+import { redirectToLogin, session } from "./session.js";
 
 const STATUS_LABELS = {
   TODO: "To do",
@@ -31,6 +32,9 @@ const statusMessageEl = document.getElementById("status-message");
 const createFormEl = document.getElementById("create-form");
 const createTitleEl = document.getElementById("create-title");
 const createDescriptionEl = document.getElementById("create-description");
+const sessionUsernameEl = document.getElementById("session-username");
+const sessionRolesEl = document.getElementById("session-roles");
+const logoutButtonEl = document.getElementById("logout-button");
 const statTotalEl = document.getElementById("stat-total");
 const statTodoEl = document.getElementById("stat-todo");
 const statInProgressEl = document.getElementById("stat-in-progress");
@@ -230,6 +234,21 @@ async function deleteTask(id) {
   }
 }
 
+async function signOut() {
+  logoutButtonEl.disabled = true;
+  try {
+    // Revokes the token server-side. Even if that fails, the local
+    // session must still go — otherwise a network blip would leave the
+    // user apparently signed in with a token they cannot use.
+    await authApi.logout();
+  } catch {
+    // Deliberately ignored; the finally block is what matters.
+  } finally {
+    session.clear();
+    redirectToLogin();
+  }
+}
+
 createFormEl.addEventListener("submit", (event) => {
   event.preventDefault();
   const title = createTitleEl.value.trim();
@@ -242,4 +261,48 @@ createFormEl.addEventListener("submit", (event) => {
   createTask(title, description);
 });
 
-loadTasks();
+logoutButtonEl.addEventListener("click", signOut);
+
+/**
+ * The protected-route guard.
+ *
+ * A stored token is not taken at face value: `GET /auth/me` asks the
+ * server whether it is still valid, so an expired or revoked token sends
+ * the browser to the login page instead of into an application whose
+ * every request would fail. With no token at all, the redirect happens
+ * immediately and no task request is ever made.
+ */
+async function start() {
+  if (!session.isAuthenticated()) {
+    redirectToLogin();
+    return;
+  }
+  let me;
+  try {
+    me = await authApi.me({ onUnauthorized: false });
+  } catch {
+    session.clear();
+    redirectToLogin();
+    return;
+  }
+
+  sessionUsernameEl.textContent = me.username;
+  sessionRolesEl.textContent = me.roles.length > 0 ? `(${me.roles.join(", ")})` : "";
+
+  // A read-only account never sees the create form, so the restriction is
+  // apparent before a click rather than after a 403. The form is hidden
+  // before the first load (no flash of a control the account cannot use),
+  // but the explanation is shown *after* it — `loadTasks` drives the same
+  // status line, and writing the notice first would have it overwritten
+  // by "Loading tasks…" a moment later.
+  const readOnly = !session.can("task.write");
+  createFormEl.hidden = readOnly;
+
+  await loadTasks();
+
+  if (readOnly) {
+    showStatus("Read-only account: you can view tasks but not change them.", false);
+  }
+}
+
+start();

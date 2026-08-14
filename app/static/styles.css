@@ -16,6 +16,17 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must actually hide.
+   The user-agent rule is `[hidden] { display: none }`, which any author
+   `display` declaration outranks — `.create-form { display: flex }` did
+   exactly that, leaving the read-only account looking at a create form it
+   was not allowed to use. `!important` is the conventional fix (it is the
+   rule normalize.css ships) because the point is to beat every author
+   `display` rule, present and future. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family:
@@ -31,7 +42,6 @@ body {
 }
 
 .app-header {
-  text-align: center;
   margin-bottom: 1.5rem;
 }
 
@@ -72,7 +82,8 @@ body {
   min-width: 0;
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="password"] {
   flex: 1 1 0;
   min-width: 0;
   padding: 0.55rem 0.7rem;
@@ -81,7 +92,8 @@ input[type="text"] {
   font-size: 0.95rem;
 }
 
-input[type="text"]:focus {
+input[type="text"]:focus,
+input[type="password"]:focus {
   outline: 2px solid var(--color-primary);
   outline-offset: -1px;
 }
@@ -252,4 +264,76 @@ button.danger:hover {
     gap: 0.25rem;
     text-align: center;
   }
+}
+
+/* -- Session bar and login (Sprint A3) ------------------------------------- */
+
+.app-narrow {
+  max-width: 26rem;
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* The login page has no session bar, so its header centres as before. */
+.app-narrow .app-header {
+  display: block;
+  text-align: center;
+}
+
+.session-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.session-roles {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+/* Inputs inside a disabled-while-submitting form read as inert rather
+   than merely unstyled. */
+.login-form input:disabled,
+.login-form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.demo-hint {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.demo-hint p {
+  margin: 0.35rem 0;
+}
+
+.demo-hint code {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.82rem;
 }

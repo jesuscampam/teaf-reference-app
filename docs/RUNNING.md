@@ -18,8 +18,15 @@ Built and verified against TEAF `v0.10.3-alpha`.
 ## Run the tests
 
 ```bash
-pytest -v
+pytest                      # everything, browser E2E included
+pytest --ignore=tests/e2e   # backend only — fast
+pytest tests/e2e            # browser only
 ```
+
+The browser suite needs Chromium (`playwright install chromium`). Without
+it, those tests skip and everything else still runs. They start their own
+`uvicorn` on a random port with a temporary database, so they never touch
+your `tasks.db` and never collide with an app already running.
 
 All tests run for real against TEAF — `tests/test_config.py` covers this
 app's own settings, `tests/test_app.py` and `tests/test_ui.py` exercise
@@ -60,7 +67,12 @@ doesn't install (it uses neither feature); those two are the only
 uvicorn app.main:app --reload
 ```
 
-Open **http://localhost:8000/** in a browser for the Task Manager UI —
+Open **http://localhost:8000/** in a browser. You will be redirected to
+**/login**; sign in as `demo` / `demo1234`, or `viewer` / `viewer1234` for
+a read-only account that gets `403` on any change. See the README's
+Authentication section for what this login is and is not.
+
+After signing in you get the Task Manager UI —
 see the README for a full click-through description (create, edit, move
 between statuses, delete, with loading/empty/error states and live
 counters).

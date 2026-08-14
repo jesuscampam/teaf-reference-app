@@ -22,6 +22,13 @@ into a status code and nothing more:
 Schema violations are rejected by FastAPI as 422 before a handler runs.
 The `/tasks` prefix (not `/api/tasks`) is this repository's existing
 convention, kept unchanged so no client breaks.
+
+Every endpoint is protected with TEAF's public `@authorize(permission=...)`
+decorator (Sprint A3). Reads need `task.read`, writes need `task.write`;
+the framework's exception handler turns a missing token into `401` and a
+missing permission into `403`, both with an RFC 7807 body, so nothing here
+constructs those responses. The decorator sits *below* the router
+decorator so FastAPI still sees the handler's real signature.
 """
 
 from __future__ import annotations
@@ -31,6 +38,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from teaf import authorize
 
 from app.modules.task.models import TaskStatus
 from app.modules.task.schemas import (
@@ -53,16 +61,31 @@ from app.modules.task.services import (
 # `dict[int, ...]` and fail `--strict` against its `dict[int | str, ...]`.
 _Responses = dict[int | str, dict[str, Any]]
 
-_BAD_REQUEST: _Responses = {status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse}}
-_NOT_FOUND: _Responses = {status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}}
+#: Every endpoint here requires a token, and the mutating ones require a
+#: permission the `viewer` role does not have — so `401` and `403` are
+#: possible on all of them and are documented as such.
+_AUTH: _Responses = {
+    status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+    status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+}
+_BAD_REQUEST: _Responses = {**_AUTH, status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse}}
+_NOT_FOUND: _Responses = {**_AUTH, status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}}
 _NOT_FOUND_OR_INVALID: _Responses = {
+    **_AUTH,
     status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
 }
 _NOT_FOUND_OR_CONFLICT: _Responses = {
+    **_AUTH,
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
     status.HTTP_409_CONFLICT: {"model": ErrorResponse},
 }
+
+#: Permission names, mirroring app.modules.auth.models.TaskPermission. Kept
+#: as literals so the Task module carries no import-time dependency on the
+#: auth module; the two are joined only by the claim in the token.
+_READ = "task.read"
+_WRITE = "task.write"
 
 
 def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
@@ -70,10 +93,12 @@ def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
     router = APIRouter(prefix="/tasks", tags=["tasks"])
 
     @router.get("", response_model=list[TaskResponse])
+    @authorize(permission=_READ)
     def list_tasks() -> list[TaskResponse]:
         return [TaskResponse.model_validate(task) for task in get_service().list_tasks()]
 
     @router.get("/stats", response_model=TaskStatsResponse)
+    @authorize(permission=_READ)
     def task_stats() -> TaskStatsResponse:
         """Counts for the UI's metrics row.
 
@@ -90,6 +115,7 @@ def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
         )
 
     @router.get("/{task_id}", response_model=TaskResponse, responses=_NOT_FOUND)
+    @authorize(permission=_READ)
     def get_task(task_id: UUID) -> TaskResponse:
         try:
             task = get_service().get_task(task_id)
@@ -103,6 +129,7 @@ def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
         status_code=status.HTTP_201_CREATED,
         responses=_BAD_REQUEST,
     )
+    @authorize(permission=_WRITE)
     def create_task(payload: TaskCreateRequest) -> TaskResponse:
         try:
             task = get_service().create_task(title=payload.title, description=payload.description)
@@ -111,6 +138,7 @@ def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
         return TaskResponse.model_validate(task)
 
     @router.put("/{task_id}", response_model=TaskResponse, responses=_NOT_FOUND_OR_INVALID)
+    @authorize(permission=_WRITE)
     def update_task(task_id: UUID, payload: TaskUpdateRequest) -> TaskResponse:
         try:
             task = get_service().update_task(
@@ -125,6 +153,7 @@ def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
     @router.patch(
         "/{task_id}/status", response_model=TaskResponse, responses=_NOT_FOUND_OR_CONFLICT
     )
+    @authorize(permission=_WRITE)
     def change_status(task_id: UUID, payload: TaskStatusUpdateRequest) -> TaskResponse:
         try:
             task = get_service().change_status(task_id, payload.status)
@@ -140,6 +169,7 @@ def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
         response_model=None,
         responses=_NOT_FOUND,
     )
+    @authorize(permission=_WRITE)
     def delete_task(task_id: UUID) -> None:
         try:
             get_service().delete_task(task_id)
@@ -149,6 +179,7 @@ def create_task_router(get_service: Callable[[], TaskService]) -> APIRouter:
     @router.post(
         "/{task_id}/complete", response_model=TaskResponse, responses=_NOT_FOUND_OR_CONFLICT
     )
+    @authorize(permission=_WRITE)
     def complete_task(task_id: UUID) -> TaskResponse:
         """Kept from Sprint A1 so existing clients keep working; equivalent to
         `PATCH /{id}/status` with `DONE`."""

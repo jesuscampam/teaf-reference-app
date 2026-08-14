@@ -9,10 +9,21 @@ teaf-reference-app/
 │   ├── static/                   # The Task Manager UI — plain HTML/CSS/JS, no framework
 │   │   ├── index.html
 │   │   ├── styles.css
+│   │   ├── login.html            # The public page
 │   │   ├── httpClient.js         # The only file that calls fetch — shared API client
+│   │   ├── session.js            # Browser auth state; the storage trade-off
+│   │   ├── login.js              # The login form
 │   │   └── app.js                # Rendering and view state only
 │   └── modules/
 │       ├── __init__.py
+│       ├── auth/                 # Demo authentication on TEAF's security API
+│       │   ├── models.py         # DemoUser, DemoRole, TaskPermission
+│       │   ├── repository.py     # The two demo accounts, Argon2-hashed at startup
+│       │   ├── services.py       # AuthService — login, logout
+│       │   ├── security.py       # Wires TEAF's JWT/identity/principal pieces
+│       │   ├── schemas.py
+│       │   ├── routes.py         # /auth/login, /auth/logout, /auth/me
+│       │   └── module.py         # AuthModule(teaf.Module)
 │       └── task/                 # Task Manager — the reference business module
 │           ├── __init__.py
 │           ├── models.py         # Task entity + TaskStatus (TODO/IN_PROGRESS/DONE)
@@ -29,6 +40,14 @@ teaf-reference-app/
 │   ├── test_app.py               # Application instantiation + the 4 TEAF endpoints
 │   ├── test_ui.py                # GET /, static assets, the CSP override
 │   ├── test_public_api.py        # Public-API boundary: AST scan for private imports
+│   ├── e2e/                      # Browser tests: real Chromium + real uvicorn
+│   │   ├── conftest.py           # Server subprocess, temp DB, per-test cleanup
+│   │   ├── test_authentication.py
+│   │   ├── test_task_flow.py
+│   │   └── test_security.py
+│   ├── modules/auth/
+│   │   ├── test_services.py      # Against the real JWTProvider and Argon2 hasher
+│   │   └── test_routes.py        # /auth over HTTP, against the real Application
 │   └── modules/task/
 │       ├── test_models.py
 │       ├── test_repository.py
@@ -91,6 +110,21 @@ teaf-reference-app/
   integration against the real, wired `Application` (`test_integration.py`,
   `test_ui.py`). `conftest.py`'s session-scoped `client` fixture is what
   makes sharing one live `Application` across those files safe.
+- **`app/modules/auth/`** exists to demonstrate TEAF's security API, not
+  to manage identities: two accounts built from configuration, hashed with
+  Argon2id, issuing revocable JWTs. `security.py` is the only file that
+  assembles framework pieces; `services.py` holds the one decision the
+  application actually owns (who may have a token), and `routes.py` is as
+  thin as the Task module's. Enforcement is `@authorize(permission=…)` on
+  the endpoints, because the middleware cannot know which routes are
+  public.
+- **`tests/e2e/`** is the only suite that runs the app as a user meets it —
+  real browser, real server, real database, no stubs and no direct service
+  calls. It is deliberately separate from `tests/modules/`: those tests
+  answer "is this unit correct", these answer "does the product work".
+  They are sorted last in the run (see `tests/conftest.py`) because
+  Playwright leaves an event loop that breaks async tests collected after
+  it.
 - **`docs/`** is kept to exactly the three files the original sprint
   called for — new sprints extend `BOOTSTRAP.md` rather than adding more
   files.

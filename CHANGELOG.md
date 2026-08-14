@@ -5,6 +5,79 @@ application, not to TEAF — the framework version each release was built
 against is stated per entry. `docs/BOOTSTRAP.md` carries the long-form
 reasoning behind each sprint; this file is the summary.
 
+## 0.4.0-alpha — Sprint A3
+
+Built against TEAF `v0.10.3-alpha`.
+
+### Added
+
+- **Demo authentication**, built entirely on TEAF's public security API:
+  `JWTProvider` (issue / verify / revoke), `Argon2PasswordHasher`,
+  `JWTIdentityProvider`, `IdentityProviderRegistry`, `PrincipalResolver`,
+  `StaticRoleResolver`, `SecurityMiddleware`, and the `@authorize()`
+  decorator. No second authentication mechanism, and no framework change.
+- `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
+- Two demo accounts, hashed with Argon2id at startup from configuration:
+  `demo` (read + write) and `viewer` (read only), so `403` is a real
+  behaviour of the running app and not just a test fixture.
+- **Every `/tasks` endpoint is now protected**: `task.read` for reads,
+  `task.write` for writes. Anonymous → `401`; authenticated without the
+  permission → `403`.
+- **Login screen** (`/login`) and a session bar with sign-out, in the same
+  vanilla ES-module frontend — no React, no bundler, no npm.
+- `app/static/session.js` — the browser's auth state in one place, stored
+  in `sessionStorage` (trade-off documented in that file and the README).
+- **Browser end-to-end suite** (`tests/e2e/`, 39 tests) driving real
+  Chromium against a real `uvicorn` process, real TEAF middleware, real
+  JWTs, and a real SQLite file, on a random port with a temporary
+  database. Every assertion goes through the UI.
+- `AUTH_JWT_SECRET`, `AUTH_DEMO_USERNAME` / `AUTH_DEMO_PASSWORD`,
+  `AUTH_VIEWER_USERNAME` / `AUTH_VIEWER_PASSWORD`, and
+  `AUTH_ACCESS_TOKEN_TTL_SECONDS` settings.
+
+### Changed
+
+- `tests/conftest.py`'s `client` fixture is now *unauthenticated*; use
+  `user_client` or `viewer_client` for authenticated requests.
+- E2E tests are sorted to the end of the run: Playwright's sync API keeps
+  an event loop alive that breaks any async test collected after it.
+
+### Fixed
+
+- **The `hidden` attribute did not hide.** `.create-form { display: flex }`
+  outranked the user-agent's `[hidden] { display: none }`, so a read-only
+  account was shown a create form it could not use. Found by the browser
+  suite; invisible to every server-side test.
+- The read-only notice was overwritten by "Loading tasks…" a moment after
+  it appeared.
+
+### Security
+
+- Passwords are only ever stored and compared as Argon2id hashes.
+- A wrong password and an unknown username produce byte-identical
+  responses, and both cost a hash — no account-existence oracle by content
+  or by timing.
+- Logout revokes the token server-side; it does not merely forget it.
+- Verified against a `debug`-level log: no password, token, `Authorization`
+  header, or signing key is written anywhere.
+- No signing key ships with the app — one is generated per process when
+  `AUTH_JWT_SECRET` is unset.
+
+### Known limitations
+
+- **This is demonstration authentication, not identity management.** Two
+  fixed accounts, no registration, no password reset, no lockout, no
+  refresh flow, no audit trail.
+- **`sessionStorage`, not an httpOnly cookie.** Readable by same-origin
+  script; mitigated by a strict `default-src 'self'` CSP with no inline
+  scripts. Production identity should use an httpOnly, SameSite cookie
+  plus CSRF protection.
+- **`POST`/`PUT`/`PATCH` with a malformed body answer `422` before `401`.**
+  FastAPI validates the schema before the endpoint's decorator runs. No
+  data is disclosed, and the schema is already public in the OpenAPI
+  document; with a well-formed body an anonymous request is always `401`.
+- TEAF's own `/health`, `/info`, and `/runtime/*` remain public.
+
 ## 0.3.0-alpha — Sprint A2
 
 Built against TEAF `v0.10.3-alpha`.

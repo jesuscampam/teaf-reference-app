@@ -1,6 +1,6 @@
 [project]
 name = "teaf-reference-app"
-version = "0.3.0-alpha"
+version = "0.4.0-alpha"
 description = "Official reference application for the Torus Enterprise Application Framework."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,10 @@ dev = [
     "ruff>=0.8.4",
     "black>=24.10.0",
     "mypy>=1.14.1",
+    # Browser end-to-end tests (tests/e2e/). The browser binary itself is
+    # not installed by pip — see docs/RUNNING.md. Tests skip cleanly when
+    # it is absent, so a machine without one still runs the full suite.
+    "playwright>=1.49.0",
 ]
 
 [build-system]
@@ -70,3 +74,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "e2e: browser end-to-end test — needs Chromium and starts a real uvicorn server",
+]

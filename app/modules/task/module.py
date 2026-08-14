@@ -58,7 +58,7 @@ class TaskModule(Module):
     def get_manifest(self) -> ModuleManifest:
         return (
             ModuleBuilder(id="task", name="task", display_name="Task Manager")
-            .with_version("0.3.0-alpha")
+            .with_version("0.4.0-alpha")
             .with_description("Minimal task-tracking module validating TEAF's public Module SDK.")
             .with_category(ModuleCategory.GENERIC)
             .add_service(TaskRepository, self._build_repository, lifetime=Lifetime.SINGLETON)

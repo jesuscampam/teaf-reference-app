@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in · TEAF Task Manager</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app app-narrow">
+      <header class="app-header">
+        <h1>TEAF Task Manager</h1>
+        <p class="subtitle">Reference Application &middot; sign in to continue</p>
+      </header>
+
+      <section class="panel">
+        <h2>Sign in</h2>
+        <form id="login-form" class="login-form">
+          <label class="field" for="username">
+            <span>Username</span>
+            <input
+              id="username"
+              name="username"
+              type="text"
+              autocomplete="username"
+              maxlength="100"
+              required
+              autofocus
+            />
+          </label>
+          <label class="field" for="password">
+            <span>Password</span>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              maxlength="200"
+              required
+            />
+          </label>
+          <div id="login-error" class="status-message error" hidden role="alert"></div>
+          <button id="login-submit" type="submit">Sign in</button>
+        </form>
+      </section>
+
+      <!-- These are demo accounts created at startup from configuration,
+           not real credentials. See the README's Authentication section. -->
+      <section class="panel demo-hint">
+        <h2>Demo accounts</h2>
+        <p>
+          <code>demo</code> / <code>demo1234</code> — can read and change tasks.
+        </p>
+        <p>
+          <code>viewer</code> / <code>viewer1234</code> — read-only; changing a task
+          returns <code>403</code>.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="/static/login.js"></script>
+  </body>
+</html>

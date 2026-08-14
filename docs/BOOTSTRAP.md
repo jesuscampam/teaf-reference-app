@@ -547,3 +547,155 @@ Persistence was verified the only way that means anything: a task was
 created against one `uvicorn` process, the process was killed, a second
 process was started over the same database file, and the task came back
 with its `IN_PROGRESS` status intact.
+
+## Sprint A3 — Authentication and browser end-to-end tests
+
+Version `0.4.0-alpha`, built against TEAF `v0.10.3-alpha`.
+
+Sprint A2 closed with one thing deliberately missing: every endpoint was
+open. This sprint closes it, and adds the only kind of test that can prove
+the result — a real browser driving the real application.
+
+### The API audit came first
+
+Before writing anything, the installed `teaf` package was inspected for
+what it actually exposes. It exposes a complete authentication stack:
+
+| Need | Public API used |
+|---|---|
+| Issue / verify / revoke tokens | `JWTProvider` (`issue`, `verify`, `revoke`) |
+| Hash and check passwords | `Argon2PasswordHasher` (`PasswordHasher`) |
+| Turn a Bearer header into an identity | `JWTIdentityProvider`, `IdentityProviderRegistry` |
+| Roles and effective permissions | `Role`, `Permission`, `StaticRoleResolver`, `PrincipalResolver` |
+| Populate the request's security context | `SecurityMiddleware` |
+| Enforce it per endpoint | `@authorize(permission=…)` |
+| Read the caller | `current_identity()` |
+| Kill a token on logout | `InMemoryTokenRevocationStore` |
+
+Nothing was missing, so nothing needed inventing. A throwaway spike proved
+the whole chain before a line of the sprint was written: `401` with no
+token, `401` with a bad one, `200` with a good one, `403` for a role
+without the permission, and `401` again after `revoke()`.
+
+### The split that matters: middleware authenticates, endpoints enforce
+
+`SecurityMiddleware` reads the `Authorization` header, resolves it to a
+`Principal`, installs a security context — and then lets the request
+through regardless. With no credentials it installs an anonymous context
+and continues.
+
+That is correct, and worth stating because it surprises people: the
+middleware has no idea which routes are public. `/auth/login` must be
+reachable without a token or nobody could ever get one. Enforcement
+therefore belongs on the endpoints, which is exactly what `@authorize()`
+does — and TEAF's exception handler turns its exceptions into `401`/`403`
+with an RFC 7807 body, so this application never constructs one.
+
+Reads require `task.read`, writes require `task.write`. The `viewer`
+account has only the first, which is what makes `403` a real behaviour of
+the running app rather than something only a test can reach.
+
+### Three findings about TEAF, none of them blocking
+
+**1. `@authorize()`'s status codes only exist inside a real `Application`.**
+The exception-to-response mapping lives in middleware that `create_app()`
+installs, and there is no public way to compose it onto a bare
+`FastAPI()`. A consumer unit-testing a router in isolation sees the raw
+`AuthenticationException` propagate instead of a `401`. Not a defect — the
+mapping is application-level by design — but it means status-code
+assertions have to live in integration tests. That is where they are, with
+a note in `tests/modules/task/test_routes.py` explaining why.
+*Smallest useful change in TEAF:* export the exception handlers (or an
+`install_exception_handlers(app)` helper) so a consumer can reproduce the
+mapping when testing a router standalone.
+
+**2. Security exceptions are not publicly exported.** `TokenRevokedException`,
+`AuthenticationException`, and the rest live in `teaf._internal.security`.
+An application that wants to catch one specifically cannot name it, and
+must either catch `Exception` or match on a message — a test here does the
+latter, deliberately, with a comment. The app itself never needs to (the
+middleware handles them), but a consumer with a custom error page would.
+*Smallest useful change:* export the security exception types from `teaf`,
+as the API-protection exceptions already are.
+
+**3. `JWTProvider`'s methods are `async`, and the signature does not say so.**
+`inspect.signature(JWTProvider.issue)` reports `-> TokenPair`, not a
+coroutine. Discovered the way everyone discovers it: an `AttributeError`
+on `'coroutine' object has no attribute 'access_token'`. Cosmetic, but a
+line in the docstring would save the next consumer the same minute.
+
+### What the browser caught that nothing else could
+
+Two real bugs, both invisible to every server-side test:
+
+**The `hidden` attribute did not hide.** `app.js` sets
+`createFormEl.hidden = true` for a read-only account. The attribute was
+set — and the form stayed on screen, because `.create-form { display: flex }`
+outranks the user-agent's `[hidden] { display: none }`. A read-only user
+was looking at a create form they were not allowed to use. Fixed with the
+`[hidden] { display: none !important }` rule that normalize.css ships for
+exactly this reason.
+
+**The read-only notice was overwritten.** It was shown before
+`loadTasks()`, which immediately replaced it with "Loading tasks…". The
+explanation now comes after the load.
+
+Neither would ever have failed an HTTP-level test. This is the argument
+for the E2E suite in one paragraph.
+
+### End-to-end means end-to-end
+
+`tests/e2e/` starts a real `uvicorn` subprocess on a random free port with
+a temporary SQLite file, and drives real Chromium against it. No stubbed
+backend, no service called directly, no request forged past the UI. Each
+test gets a fresh browser context (so no test inherits another's login)
+and an emptied task list (so counter assertions do not depend on order).
+
+One ordering constraint had to be handled: Playwright's synchronous API
+keeps an event loop alive for the rest of the session, and any `async`
+test collected afterwards fails with "Cannot run the event loop while
+another loop is running". Rather than splitting the suite into two
+commands, `pytest_collection_modifyitems` sorts the E2E tests last — one
+`pytest` still runs everything.
+
+### Where the token lives, and the honest trade-off
+
+`sessionStorage`. Not the most secure option available — that is an
+httpOnly cookie, which script cannot read at all — but the one whose
+trade-off is defensible here and is written down rather than glossed over:
+
+    httpOnly cookie   XSS-safe, survives tab close, needs CSRF defence
+    localStorage      XSS-readable, survives tab close
+    sessionStorage    XSS-readable, dies with the tab   <- this app
+
+The page ships `default-src 'self'` with no inline scripts and no external
+origins, which is what keeps the XSS exposure small enough to accept for a
+demonstration. The README says plainly that a real application should use
+an httpOnly, SameSite cookie with CSRF protection.
+
+### Security review
+
+Checked, not assumed. Against a `debug`-level log of a real login and an
+authenticated request: no password, no token, no `Authorization` header,
+and no signing key appears anywhere. A wrong password and an unknown
+username return byte-identical bodies (bar the per-request correlation id)
+and both pay for a hash, so neither content nor timing reveals whether an
+account exists. Logout revokes server-side. No secret ships with the app:
+an unset `AUTH_JWT_SECRET` generates a random key per process, so there is
+no default to forge against.
+
+One behaviour is documented rather than fixed: an anonymous request with a
+*malformed* body answers `422`, not `401`, because FastAPI validates the
+schema before the endpoint's decorator runs. Nothing is disclosed that the
+public OpenAPI document does not already state, and with a well-formed
+body an anonymous request is always `401`. Adding a second enforcement
+point in middleware to change this would duplicate authorization in two
+places, which is worse than the thing it fixes.
+
+### Validation
+
+`pytest`: **267 passed**, **100%** coverage of `app/` — 228 backend tests
+plus 39 browser tests. `ruff`, `black`, and `mypy --strict` clean, with no
+new `type: ignore`, `noqa`, or relaxed rule. The public-API boundary is
+still an executable AST test, and still reports zero private imports.
+TEAF's repository was not modified: `git status` clean, `HEAD` unchanged.

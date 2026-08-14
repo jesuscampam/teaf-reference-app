@@ -9,8 +9,17 @@
   <body>
     <main class="app">
       <header class="app-header">
-        <h1>TEAF Task Manager</h1>
-        <p class="subtitle">Reference Application &middot; Task Manager module</p>
+        <div class="header-main">
+          <h1>TEAF Task Manager</h1>
+          <p class="subtitle">Reference Application &middot; Task Manager module</p>
+        </div>
+        <div class="session-bar">
+          <span class="session-user">
+            Signed in as <strong id="session-username">…</strong>
+            <span id="session-roles" class="session-roles"></span>
+          </span>
+          <button id="logout-button" type="button" class="secondary">Sign out</button>
+        </div>
       </header>
 
       <section class="panel">
