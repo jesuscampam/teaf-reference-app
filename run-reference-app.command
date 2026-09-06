@@ -15,6 +15,7 @@ if [[ ! -d "$TEAF_DIR" ]]; then
   exit 1
 fi
 
+rm -rf .venv
 if [[ ! -d ".venv" ]]; then
   print "Creating .venv..."
   python3 -m venv .venv
